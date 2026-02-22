@@ -14,7 +14,7 @@ for f in "$PENDING_DIR"/*.pending; do
 
   if [ "$AGE" -gt 300 ]; then
     # Заблокировать IP
-    ufw insert 1 deny from "$IP" to any 2>/dev/null
+    sudo ufw insert 1 deny from "$IP" to any 2>/dev/null
 
     curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
       -d "chat_id=${TG_OWNER_ID}" \

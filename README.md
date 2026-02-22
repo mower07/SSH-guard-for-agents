@@ -8,8 +8,8 @@
 ## Кому поможет
 
 - Разработчикам и системным администраторам с VPS
-- Тем, у кого несколько серверов и нет времени смотреть логи
-- Тем, кто хочет знать о подозрительных входах в реальном времени
+- Командам где несколько серверов, агентов, рабочих мест или сотрудников
+- Тем, кто хочет знать о подозрительных входах в реальном времени — без логов и мониторинга вручную
 
 ---
 
@@ -39,6 +39,7 @@
 - Ubuntu/Debian с UFW
 - Telegram-бот (создать через @BotFather, получить токен)
 - SSH-доступ к серверу с ключом (без пароля)
+- Один из серверов — **мастер** (хранит общий whitelist и раздаёт его остальным)
 
 ---
 
@@ -49,22 +50,18 @@
 - Сохранить токен
 - Узнать свой Telegram ID: написать @userinfobot
 
-### 2. Заполнить `.env_secrets`
+### 2. Заполнить `.env_secrets` на мастер-сервере
 ```bash
-cp .env_secrets.template /root/.env_secrets
+cp scripts/.env_secrets.template /root/.env_secrets
 nano /root/.env_secrets
-# Вставить TG_BOT_TOKEN и TG_OWNER_ID
 chmod 600 /root/.env_secrets
 ```
 
-### 3. Развернуть на первом сервере
+### 3. Развернуть на мастер-сервере
 ```bash
-# Создать директорию
 mkdir -p /root/scripts/security/pending
-
-# Скопировать скрипты
-cp *.sh /root/scripts/security/
-cp whitelist-ips.conf servers.conf /root/scripts/security/
+cp scripts/*.sh /root/scripts/security/
+cp scripts/*.conf /root/scripts/security/
 chmod 700 /root/scripts/security/*.sh
 
 # SSH-алерт через PAM
@@ -80,29 +77,161 @@ echo 'session optional pam_exec.so /root/scripts/security/ssh-alert.sh' >> /etc/
 
 ### 4. Добавить свой IP в белый список
 ```bash
-echo "1.2.3.4 Имя" >> /root/scripts/security/whitelist-ips.conf
+echo "1.2.3.4 Admin" >> /root/scripts/security/whitelist-ips.conf
 ```
 
 ### 5. Добавить следующий сервер
 ```bash
-# С первого сервера:
 ./onboard-server.sh root@IP "Метка"
-# Например:
-./onboard-server.sh root@95.X.X.X "Server-1"
+# Пример:
+./onboard-server.sh root@95.X.X.X "Server-2"
 ```
 
 ---
 
 ## Настройка `ssh-alert.sh`
 
-В начале скрипта поменять:
+В начале скрипта поменять метку сервера:
 ```bash
-SERVER_LABEL="MyServer"   # Метка этого сервера в уведомлениях
+SERVER_LABEL="MyServer"
 ```
 
-В `monitor.sh` поменять список сервисов:
+В `monitor.sh` — список сервисов для мониторинга:
 ```bash
-SERVICES="nginx postgresql myapp"   # Ваши сервисы
+SERVICES="nginx postgresql myapp"
+```
+
+---
+
+## Работа с несколькими серверами и агентами
+
+### Архитектура
+
+```
+Мастер-сервер (хранит whitelist)
+├── /root/scripts/security/whitelist-ips.conf  ← единый список
+├── /root/scripts/security/servers.conf        ← список серверов
+└── cron: sync-whitelist.sh каждые 5 мин → пушит на все серверы
+
+Сервер-2, Сервер-3, ..., Сервер-N
+└── /root/scripts/security/whitelist-ips.conf  ← получают от мастера
+```
+
+### Добавить новый сервер (с мастера)
+```bash
+./onboard-server.sh root@NEW_IP "Prod-Backend"
+```
+Скрипт автоматически:
+- Создаёт директории и pending/
+- Копирует `.env_secrets` и `whitelist-ips.conf`
+- Устанавливает PAM-хук
+- Добавляет cron для `pending-check.sh`
+- Вносит сервер в `servers.conf`
+
+### Несколько рабочих мест одного человека
+
+Добавить все IP в whitelist с разными метками:
+```bash
+echo "1.2.3.4 Admin-home" >> /root/scripts/security/whitelist-ips.conf
+echo "5.6.7.8 Admin-office" >> /root/scripts/security/whitelist-ips.conf
+echo "9.10.11.12 Admin-mobile" >> /root/scripts/security/whitelist-ips.conf
+```
+
+> ⚠️ Мобильный интернет и некоторые провайдеры дают динамические IP.
+> Такие адреса менять придётся вручную при смене.
+
+### Несколько сотрудников
+
+```bash
+echo "1.2.3.4 Иван" >> whitelist-ips.conf
+echo "5.6.7.8 Мария-home" >> whitelist-ips.conf
+echo "9.10.11.12 Мария-office" >> whitelist-ips.conf
+echo "13.14.15.16 Алексей" >> whitelist-ips.conf
+```
+
+Каждый вход в лог-алерте будет подписан именем — сразу видно кто зашёл и откуда.
+
+### 10 агентов на разных серверах
+
+Каждый агент — это процесс (бот, AI-агент, скрипт), который подключается к серверам по SSH.
+У каждого агента свой IP сервера, откуда он работает. Добавить в whitelist:
+
+```bash
+echo "10.0.0.1 Agent-1" >> whitelist-ips.conf
+echo "10.0.0.2 Agent-2" >> whitelist-ips.conf
+# ...
+echo "10.0.0.10 Agent-10" >> whitelist-ips.conf
+```
+
+После обновления whitelist-а — синхронизировать вручную (или подождать 5 мин):
+```bash
+bash /root/scripts/security/sync-whitelist.sh
+```
+
+---
+
+## Частые проблемы
+
+### Меня заблокировало — не могу зайти по SSH
+
+**Причина:** pending файл для твоего IP не был удалён вовремя, cron заблокировал.
+
+**Решение:**
+1. Зайти через KVM/VNC консоль хостинг-провайдера (без SSH)
+2. Выполнить:
+```bash
+ufw delete deny from ТВОЙ_IP
+```
+
+**Профилактика:**
+- Добавить свой IP в whitelist до первого входа
+- Дать агенту право `sudo ufw` без пароля — тогда он сможет разблокировать сам:
+```bash
+echo "myuser ALL=(ALL) NOPASSWD: /usr/sbin/ufw" >> /etc/sudoers.d/myuser-ufw
+chmod 440 /etc/sudoers.d/myuser-ufw
+```
+
+### Один и тот же IP спрашивает дважды
+
+**Причина:** PAM открывает два сеанса на один SSH-вход (нормальное поведение).
+
+**Решение:** Проверить что строка в `/etc/pam.d/sshd` ровно одна:
+```bash
+grep "ssh-alert" /etc/pam.d/sshd
+```
+Если две — удалить дубль:
+```bash
+sed -i '0,/ssh-alert/! {/ssh-alert/d}' /etc/pam.d/sshd
+```
+
+### Whitelist обновил, но сервер всё равно спрашивает
+
+**Причина:** Синхронизация раз в 5 мин — ещё не успела.
+
+**Решение:** Синхронизировать вручную:
+```bash
+bash /root/scripts/security/sync-whitelist.sh
+```
+
+### Агент/бот постоянно триггерит алерты
+
+**Причина:** IP агента не в whitelist или IP сервера агента меняется (динамический).
+
+**Решение:**
+1. Добавить статический IP агента в whitelist
+2. Или перевести агента на SSH-ключ с фиксированного сервера с известным IP
+
+### Сервер заблокировал нужный IP автоматически
+
+**Причина:** Никто не ответил на алерт в течение 5 минут.
+
+**Решение:**
+```bash
+# Разблокировать вручную
+ufw delete deny from IP_АДРЕС
+# Добавить в whitelist чтобы не повторилось
+echo "IP_АДРЕС Метка" >> /root/scripts/security/whitelist-ips.conf
+bash /root/scripts/security/sync-whitelist.sh
 ```
 
 ---
@@ -112,14 +241,15 @@ SERVICES="nginx postgresql myapp"   # Ваши сервисы
 Файл `whitelist-ips.conf`:
 ```
 1.2.3.4 Admin
-157.X.X.X RemoteAgent
+5.6.7.8 RemoteAgent
+9.10.11.12 Colleague
 ```
 
 При входе скрипт ищет IP в списке:
 - Нашёл → `Откуда: Admin (1.2.3.4)` без вопросов
 - Не нашёл → спрашивает подтверждение, создаёт `.pending` файл
 
-Ответ "ДА" → добавить IP вручную в `whitelist-ips.conf`.
+Ответ "ДА" → добавить IP вручную в `whitelist-ips.conf` + синхронизировать.
 Ответ "НЕТ" или молчание 5 мин → `ufw insert 1 deny from IP`.
 
 ---
@@ -129,24 +259,25 @@ SERVICES="nginx postgresql myapp"   # Ваши сервисы
 ```
 scripts/
 ├── ssh-alert.sh          # PAM-хук: алерт при SSH-входе
-├── pending-check.sh      # Автоблокировка по таймауту
+├── pending-check.sh      # Автоблокировка по таймауту (5 мин)
 ├── monitor.sh            # Мониторинг сервисов + диск + память
 ├── port-check.sh         # Аномальные порты
 ├── sync-whitelist.sh     # Синхронизация whitelist на все серверы
 ├── onboard-server.sh     # Деплой на новый сервер
 ├── whitelist-ips.conf    # Белый список IP
 ├── servers.conf          # Список серверов для синхронизации
-└── .env_secrets.template # Шаблон токенов
+└── .env_secrets.template # Шаблон токенов (не коммитить реальный файл!)
 ```
 
 ---
 
 ## Известные ограничения
 
-- Блокировка через UFW (`ufw insert 1 deny from IP`) — блокирует весь трафик с IP, не только SSH
-- Ответ "ДА" на вопрос о неизвестном IP нужно обрабатывать вручную (добавить в whitelist)
-- `monitor.sh` — список сервисов нужно прописать под каждый сервер отдельно
-- Белый список IP не учитывает динамические IP (например, мобильный интернет)
+- Блокировка через UFW блокирует весь трафик с IP, не только SSH
+- Ответ "ДА" обрабатывается вручную — нужно самому добавить IP в whitelist
+- `monitor.sh` — список сервисов прописывается отдельно на каждом сервере
+- Динамические IP (мобильный, некоторые провайдеры) — придётся обновлять вручную
+- Один Telegram-бот уведомляет одного человека. Для команды нужно доработать скрипт под рассылку нескольким chat_id
 
 ---
 

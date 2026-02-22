@@ -9,7 +9,7 @@ HOST=$(hostname -s)
 ALERTS=""
 
 # === User сервисы ===
-SERVICES="nginx postgresql"  # Укажите ваши сервисы
+SERVICES="telegram-mcp.service telegram-dm.service openclaw-gateway.service"
 for svc in $SERVICES; do
   status=$(systemctl --user is-active "$svc" 2>/dev/null)
   if [ "$status" != "active" ]; then

@@ -13,6 +13,7 @@ if [ "$PAM_TYPE" != "open_session" ]; then exit 0; fi
 
 WHITELIST="/root/scripts/security/whitelist-ips.conf"
 PENDING_DIR="/root/scripts/security/pending"
+QUEUE_FILE="/root/scripts/security/ssh-queue.txt"
 mkdir -p "$PENDING_DIR"
 
 send_msg() {
@@ -23,26 +24,39 @@ send_msg() {
     > /dev/null 2>&1
 }
 
-# Найти метку IP в белом списке
+ban_ip() {
+  local IP="$1"
+  ufw insert 1 deny from "$IP" to any 2>/dev/null
+  send_msg "🚫 СРАЗУ ЗАБЛОКИРОВАН <code>${IP}</code> на ${SERVER_LABEL} | <b>${HOST}</b>
+Причина: повторный вход с неизвестного IP.
+Время: ${DATE}
+Разблокировать: <code>ufw delete deny from ${IP}</code>"
+}
+
 LABEL=$(grep "^${PAM_RHOST} " "$WHITELIST" 2>/dev/null | head -1 | awk '{$1=""; print $0}' | xargs)
 
 if [ -n "$LABEL" ]; then
-  # Известный IP — простой алерт
-  send_msg "🔐 SSH вход на ${SERVER_LABEL} | <b>${HOST}</b> (<code>${SERVER_IP}</code>)
-Пользователь: <code>${PAM_USER}</code>
-Откуда: ${LABEL} (<code>${PAM_RHOST}</code>)
-Время: ${DATE}"
+  # Известный IP → очередь
+  echo "${SERVER_LABEL}|${HOST}|${SERVER_IP}|${PAM_USER}|${PAM_RHOST}|${LABEL}|${DATE}" >> "$QUEUE_FILE"
 else
-  # Неизвестный IP — создать pending + спросить
   SAFE_IP="${PAM_RHOST//\./_}"
-  PENDING_FILE="${PENDING_DIR}/$(date +%s)_${SAFE_IP}.pending"
-  echo "${PAM_RHOST}|${HOST}|${SERVER_LABEL}|${SERVER_IP}" > "$PENDING_FILE"
+  EXISTING_PENDING=$(ls "${PENDING_DIR}/"*"_${SAFE_IP}.pending" 2>/dev/null | head -1)
 
-  send_msg "⚠️ НЕИЗВЕСТНЫЙ вход на ${SERVER_LABEL} | <b>${HOST}</b> (<code>${SERVER_IP}</code>)
+  if [ -n "$EXISTING_PENDING" ]; then
+    # Уже было — повторный вход неизвестного IP → сразу бан
+    ban_ip "$PAM_RHOST"
+    rm -f "$EXISTING_PENDING"
+  else
+    # Первый раз — создать pending + спросить
+    PENDING_FILE="${PENDING_DIR}/$(date +%s)_${SAFE_IP}.pending"
+    echo "${PAM_RHOST}|${HOST}|${SERVER_LABEL}|${SERVER_IP}" > "$PENDING_FILE"
+
+    send_msg "⚠️ НЕИЗВЕСТНЫЙ вход на ${SERVER_LABEL} | <b>${HOST}</b> (<code>${SERVER_IP}</code>)
 Пользователь: <code>${PAM_USER}</code>
 Откуда: <code>${PAM_RHOST}</code> ❓
 Время: ${DATE}
 
 Это ты? Ответь <b>ДА</b> — добавлю в белый список.
 <b>НЕТ</b> или молчание 5 мин — заблокирую IP."
+  fi
 fi

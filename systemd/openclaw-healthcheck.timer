@@ -1,0 +1,12 @@
+[Unit]
+Description=Run OpenClaw healthcheck every 90 seconds
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=90s
+AccuracySec=10s
+Unit=openclaw-healthcheck.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

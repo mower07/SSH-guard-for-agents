@@ -244,3 +244,27 @@ scripts/
 ---
 
 Built in February 2026. Tested on Ubuntu 22.04 / 24.04.
+
+## OpenClaw self-heal (systemd watchdog + timer)
+
+This repository now includes a lightweight self-heal profile for OpenClaw services.
+
+Files:
+- `scripts/service-healthcheck.sh`
+- `systemd/openclaw-healthcheck.service`
+- `systemd/openclaw-healthcheck.timer`
+
+Install (user-level systemd):
+```bash
+mkdir -p ~/.config/systemd/user
+cp systemd/openclaw-healthcheck.service ~/.config/systemd/user/
+cp systemd/openclaw-healthcheck.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now openclaw-healthcheck.timer
+```
+
+What it does:
+- every 90s checks `openclaw-gateway.service`, `telegram-mcp.service`, `telegram-dm.service`
+- if service is not active, restarts it
+- anti-spam event logging (`~/.cache/openclaw-healthcheck/events.log`)
+- no LLM calls, negligible CPU

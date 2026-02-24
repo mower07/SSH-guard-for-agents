@@ -244,3 +244,27 @@ scripts/
 ---
 
 Сделано в феврале 2026. Работает на Ubuntu 22.04 / 24.04.
+
+## Самовосстановление OpenClaw (systemd watchdog + timer)
+
+В репозиторий добавлен лёгкий профиль самовосстановления сервисов OpenClaw.
+
+Файлы:
+- `scripts/service-healthcheck.sh`
+- `systemd/openclaw-healthcheck.service`
+- `systemd/openclaw-healthcheck.timer`
+
+Установка (user-level systemd):
+```bash
+mkdir -p ~/.config/systemd/user
+cp systemd/openclaw-healthcheck.service ~/.config/systemd/user/
+cp systemd/openclaw-healthcheck.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now openclaw-healthcheck.timer
+```
+
+Что делает:
+- каждые 90 сек проверяет `openclaw-gateway.service`, `telegram-mcp.service`, `telegram-dm.service`
+- если сервис не active - перезапускает
+- anti-spam лог событий (`~/.cache/openclaw-healthcheck/events.log`)
+- без LLM-вызовов, нагрузка минимальная

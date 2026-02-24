@@ -1,0 +1,7 @@
+[Unit]
+Description=OpenClaw lightweight healthcheck (no LLM calls)
+After=default.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/projects/SSH-guard-for-agents/scripts/service-healthcheck.sh

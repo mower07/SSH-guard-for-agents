@@ -1,0 +1,12 @@
+{
+  "name": "SSH Guard for Agents",
+  "tagline": "SSH monitoring + auto-block unknown IPs. Telegram alerts. No dependencies.",
+  "description": "Protects your VPS from unauthorized SSH access and keeps you informed in real time.\n\nSends a Telegram alert on every SSH login. Whitelisted IPs pass silently; unknown IPs trigger an alert and get auto-blocked via iptables/ufw. Message batching prevents Telegram flood.\n\nIncludes: ssh-alert.sh (PAM hook), send-queue.sh (flood-safe sender), sync-whitelist.sh (multi-server sync), service-healthcheck.sh (systemd timer), onboard-server.sh (one-command setup).\n\nBash only. No external APIs, no Python, no Node. Works on any Ubuntu/Debian VPS.",
+  "category": "security",
+  "tags": ["ssh", "security", "telegram", "vps", "monitoring", "bash", "server"],
+  "version": "1.0.0",
+  "license": "MIT",
+  "pricing": "free",
+  "support_url": "https://github.com/mower07/SSH-guard-for-agents/issues",
+  "homepage": "https://github.com/mower07/SSH-guard-for-agents"
+}
